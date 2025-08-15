@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.plllaton."
     },
     "android": {
       "adaptiveIcon": {
@@ -38,6 +39,12 @@
     "experiments": {
       "typedRoutes": true
     },
-    "displayName": "СпортОриентирование Профессиональное"
+    "displayName": "СпортОриентирование Профессиональное",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d5f863c7-acf5-4183-921c-8a716f9943cf"
+      }
+    }
   }
 }
