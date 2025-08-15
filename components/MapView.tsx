@@ -1,26 +1,7 @@
 import React from "react";
 import { View, StyleSheet, Text, TouchableOpacity, Platform } from "react-native";
+import MapView, { Marker, Circle, Region } from "react-native-maps";
 import { Id } from "@/convex/_generated/dataModel";
-
-// Conditional import for react-native-maps - only on native platforms
-let MapView: any = null;
-let Marker: any = null;
-let Circle: any = null;
-let PROVIDER_GOOGLE: any = null;
-
-// Only import maps on native platforms
-if (Platform.OS !== 'web') {
-  try {
-    const Maps = require('react-native-maps');
-    MapView = Maps.default || Maps.MapView;
-    Marker = Maps.Marker;
-    Circle = Maps.Circle;
-    PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-  } catch (error) {
-    console.warn('react-native-maps not available:', error);
-    MapView = null;
-  }
-}
 
 interface ControlPoint {
   _id: Id<"controlPoints">;
@@ -37,49 +18,52 @@ interface ControlPoint {
     order: number;
     nextPointId?: Id<"controlPoints">;
   };
-  isActive: boolean;
+  isActive?: boolean;
 }
 
-interface MapViewProps {
+interface GameMapViewProps {
   userLocation: {
     latitude: number;
     longitude: number;
   } | null;
-  controlPoints?: ControlPoint[];
-  foundPoints?: Id<"controlPoints">[];
+  controlPoints: ControlPoint[];
+  foundPoints: Id<"controlPoints">[];
   isJudgeMode?: boolean;
   onMapPress?: (coordinate: { latitude: number; longitude: number }) => void;
 }
 
-export default function GameMapView({
+const getMarkerColor = (point: ControlPoint, foundPoints: Id<"controlPoints">[] = []) => {
+  if (foundPoints.includes(point._id)) {
+    return "#34C759"; // Green for found points
+  }
+  if (point.type === "visible") {
+    return "#FF3B30"; // Red for visible points
+  }
+  if (point.type === "sequential" && point.isActive) {
+    return "#FF9500"; // Orange for active sequential points
+  }
+  return "#8E8E93"; // Gray for inactive points
+};
+
+const getMarkerTitle = (point: ControlPoint, index: number, foundPoints: Id<"controlPoints">[] = []) => {
+  const symbol = point.content.symbol || `${index + 1}`;
+  const found = foundPoints.includes(point._id) ? " ✅" : "";
+  return `${symbol}${found}`;
+};
+
+const GameMapView: React.FC<GameMapViewProps> = ({
   userLocation,
-  controlPoints = [],
-  foundPoints = [],
+  controlPoints,
+  foundPoints,
   isJudgeMode = false,
   onMapPress,
-}: MapViewProps) {
-  const getMarkerColor = (point: ControlPoint): string => {
-    if (foundPoints.includes(point._id)) return "#34C759"; // Green for found
-    if (point.type === "visible") return "#FF3B30"; // Red for visible
-    if (point.type === "sequential" && point.isActive) return "#FF9500"; // Orange for active sequential
-    return "#8E8E93"; // Gray for inactive
-  };
-
-  const getMarkerTitle = (point: ControlPoint, index: number): string => {
-    const symbol = point.content.symbol || "📍";
-    const status = foundPoints.includes(point._id) ? " ✅" : "";
-    return `${symbol} Точка ${index + 1}${status}`;
-  };
-
-  // Web fallback or when maps are not available
-  if (Platform.OS === 'web' || !MapView) {
+}) => {
+  // Web fallback (same as before)
+  if (Platform.OS === 'web') {
     return (
       <View style={styles.container}>
         <View style={styles.webFallback}>
-          <Text style={styles.webFallbackTitle}>🗺️ Карта</Text>
-          <Text style={styles.webFallbackText}>
-            Карта доступна только в мобильном приложении
-          </Text>
+          <Text style={styles.webTitle}>🗺️ Карта доступна только в мобильном приложении</Text>
           
           {userLocation && (
             <View style={styles.locationInfo}>
@@ -97,8 +81,8 @@ export default function GameMapView({
             <View style={styles.pointsList}>
               <Text style={styles.pointsTitle}>🎯 Контрольные точки:</Text>
               {controlPoints.map((point, index) => {
-                const color = getMarkerColor(point);
-                const title = getMarkerTitle(point, index);
+                const color = getMarkerColor(point, foundPoints);
+                const title = getMarkerTitle(point, index, foundPoints);
                 
                 return (
                   <View key={point._id} style={styles.pointItem}>
@@ -145,57 +129,52 @@ export default function GameMapView({
     );
   }
 
+  // Mobile version — настоящая карта (Apple Maps)
   return (
     <View style={styles.container}>
       {userLocation ? (
-        <MapView
+  <MapView
           style={styles.map}
-          provider={PROVIDER_GOOGLE}
           initialRegion={{
             latitude: userLocation.latitude,
             longitude: userLocation.longitude,
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
           }}
-          showsUserLocation={true}
-          showsMyLocationButton={true}
+          showsUserLocation
+          showsMyLocationButton
           followsUserLocation={!isJudgeMode}
           onPress={onMapPress ? (e: any) => onMapPress(e.nativeEvent.coordinate) : undefined}
           mapType="standard"
         >
-          {/* Control Points */}
+          {/* Контрольные точки */}
           {controlPoints.map((point, index) => {
-            // In player mode, only show visible points or found sequential points
             if (!isJudgeMode && point.type === "sequential" && !point.isActive && !foundPoints.includes(point._id)) {
               return null;
             }
-
             return (
               <Marker
                 key={point._id}
-                coordinate={{
-                  latitude: point.latitude,
-                  longitude: point.longitude,
-                }}
-                title={getMarkerTitle(point, index)}
+                coordinate={{ latitude: point.latitude, longitude: point.longitude }}
+                title={getMarkerTitle(point, index, foundPoints)}
                 description={point.content.hint || "Контрольная точка"}
-                pinColor={getMarkerColor(point)}
+                pinColor={getMarkerColor(point, foundPoints)}
               />
             );
           })}
 
-          {/* Detection radius for player mode */}
+          {/* Радиус обнаружения для игрока */}
           {!isJudgeMode && userLocation && (
             <Circle
               center={userLocation}
-              radius={5} // 5 meter detection radius
-              strokeColor="rgba(0, 122, 255, 0.5)"
-              fillColor="rgba(0, 122, 255, 0.1)"
+              radius={5}
+              strokeColor="rgba(0,122,255,0.5)"
+              fillColor="rgba(0,122,255,0.1)"
               strokeWidth={2}
             />
           )}
 
-          {/* Judge location marker */}
+          {/* Позиция судьи */}
           {isJudgeMode && userLocation && (
             <Marker
               coordinate={userLocation}
@@ -212,7 +191,7 @@ export default function GameMapView({
         </View>
       )}
 
-      {/* Map Legend */}
+      {/* Легенда */}
       <View style={styles.legend}>
         <Text style={styles.legendTitle}>Легенда:</Text>
         <View style={styles.legendItem}>
@@ -236,127 +215,170 @@ export default function GameMapView({
       </View>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    position: "relative",
+    backgroundColor: "#f5f5f5",
+  },
+  tempMapPlaceholder: {
+    flex: 1,
+    padding: 20,
+    backgroundColor: "#fff",
+    margin: 10,
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   map: {
     flex: 1,
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#1E1E1E",
+    justifyContent: "center",
+    backgroundColor: "#fff",
   },
   loadingText: {
-    color: "#FFFFFF",
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: "600",
-    marginBottom: 8,
+    color: "#111",
+    marginBottom: 6,
   },
   loadingSubtext: {
-    color: "#888888",
+    fontSize: 13,
+    color: "#666",
+  },
+  tempTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+    color: "#333",
+    marginBottom: 8,
+  },
+  tempSubtitle: {
     fontSize: 14,
+    textAlign: "center",
+    color: "#666",
+    marginBottom: 20,
   },
   webFallback: {
     flex: 1,
-    backgroundColor: "#1E1E1E",
     padding: 20,
+    backgroundColor: "#fff",
   },
-  webFallbackTitle: {
-    color: "#FFFFFF",
-    fontSize: 24,
+  webTitle: {
+    fontSize: 18,
     fontWeight: "bold",
     textAlign: "center",
-    marginBottom: 16,
-  },
-  webFallbackText: {
-    color: "#888888",
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 24,
+    color: "#333",
+    marginBottom: 20,
   },
   locationInfo: {
-    backgroundColor: "#2C2C2E",
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: "#f0f8ff",
+    padding: 15,
+    borderRadius: 8,
     marginBottom: 20,
   },
   locationTitle: {
-    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
+    color: "#333",
     marginBottom: 8,
   },
   locationText: {
-    color: "#CCCCCC",
     fontSize: 14,
+    color: "#666",
     marginBottom: 4,
   },
   pointsList: {
-    backgroundColor: "#2C2C2E",
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: "#fff8f0",
+    padding: 15,
+    borderRadius: 8,
+    marginBottom: 20,
   },
   pointsTitle: {
-    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
+    color: "#333",
     marginBottom: 12,
   },
   pointItem: {
     flexDirection: "row",
     alignItems: "center",
     marginBottom: 12,
+    backgroundColor: "#fff",
+    padding: 10,
+    borderRadius: 6,
   },
   pointMarker: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    marginRight: 12,
+    marginRight: 10,
   },
   pointInfo: {
     flex: 1,
   },
   pointTitle: {
-    color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
+    color: "#333",
     marginBottom: 2,
   },
   pointCoords: {
-    color: "#888888",
     fontSize: 12,
-    marginBottom: 2,
+    color: "#666",
+    marginBottom: 4,
   },
   pointHint: {
-    color: "#CCCCCC",
     fontSize: 12,
+    color: "#007AFF",
     fontStyle: "italic",
   },
-  legend: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    backgroundColor: "rgba(30, 30, 30, 0.9)",
-    borderRadius: 8,
+  addPointButton: {
+    backgroundColor: "#007AFF",
     padding: 12,
-    minWidth: 200,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 20,
+  },
+  addPointText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  legend: {
+    backgroundColor: "#fff",
+    margin: 10,
+    padding: 15,
+    borderRadius: 10,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   legendTitle: {
-    color: "#FFFFFF",
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "600",
-    marginBottom: 8,
+    color: "#333",
+    marginBottom: 10,
   },
   legendItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: 8,
   },
   legendColor: {
     width: 12,
@@ -365,7 +387,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   legendText: {
-    color: "#CCCCCC",
-    fontSize: 12,
+    fontSize: 14,
+    color: "#666",
   },
 });
+
+export default GameMapView;
