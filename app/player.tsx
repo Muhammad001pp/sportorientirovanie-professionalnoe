@@ -239,9 +239,11 @@ export default function PlayerScreen() {
 
   const getVisiblePoints = () => {
     if (!controlPoints) return [];
-    return controlPoints.filter(point => 
-      point.isActive && (point.type === "visible" || foundPoints.includes(point._id))
-    );
+    return controlPoints.filter(point => {
+      if (point.type === "visible") return true;
+      // sequential
+      return point.isActive || foundPoints.includes(point._id);
+    });
   };
 
   const getPointDistance = (point: ControlPoint): number => {
@@ -293,7 +295,7 @@ export default function PlayerScreen() {
               {playerLocation && (
                 <View style={styles.locationInfo}>
                   <Text style={styles.locationTitle}>📍 Ваша позиция:</Text>
-                  <Text style={styles.locationText}>
+                  <Text style={styles.locationTextInline}>
                     {playerLocation.coords.latitude.toFixed(6)}, {playerLocation.coords.longitude.toFixed(6)}
                   </Text>
                 </View>
@@ -433,8 +435,7 @@ export default function PlayerScreen() {
 
               {getVisiblePoints().length === 0 && (
                 <Text style={styles.emptyText}>
-                  Контрольные точки пока не видны.{"\n"}
-                  Дождитесь активации игры судьей.
+                  Пока нет видимых точек. Если точки последовательные — начните игру и идите к первой активной точке.
                 </Text>
               )}
             </View>
@@ -588,7 +589,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 8,
   },
-  locationText: {
+  locationTextInline: {
     color: "#CCCCCC",
     fontSize: 14,
   },

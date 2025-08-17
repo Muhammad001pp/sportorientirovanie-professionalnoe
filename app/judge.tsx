@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -51,6 +51,8 @@ export default function JudgeScreen() {
   const [showAddPoint, setShowAddPoint] = useState(false);
   const [gameId, setGameId] = useState<Id<"games"> | null>(null);
   const [showMap, setShowMap] = useState(true);
+  const [focusPointId, setFocusPointId] = useState<Id<"controlPoints"> | null>(null);
+  const [editPoint, setEditPoint] = useState<ControlPoint | null>(null);
   
   // New point form state
   const [newPointType, setNewPointType] = useState<"visible" | "sequential">("visible");
@@ -59,7 +61,8 @@ export default function JudgeScreen() {
     hint: "",
     symbol: "🚩",
   });
-  const [selectedMapLocation, setSelectedMapLocation] = useState<{latitude: number, longitude: number} | null>(null);
+  const [nextPointId, setNextPointId] = useState<Id<"controlPoints"> | null>(null);
+  const [selectedMapLocation, setSelectedMapLocation] = useState<{ latitude: number; longitude: number } | null>(null);
 
   const judgeId = "judge_001"; // In real app, this would be from auth
   
@@ -72,6 +75,9 @@ export default function JudgeScreen() {
   const activateGame = useMutation(api.games.activateGame);
   const createControlPoint = useMutation(api.controlPoints.createControlPoint);
   const deleteControlPoint = useMutation(api.controlPoints.deleteControlPoint);
+  const updateChain = useMutation(api.controlPoints.updateControlPointChain);
+  const setStartSequential = useMutation(api.controlPoints.setStartSequentialPoint);
+  const updatePoint = useMutation(api.controlPoints.updateControlPoint);
 
   useEffect(() => {
     if (activeGame) {
@@ -124,38 +130,53 @@ export default function JudgeScreen() {
     }
   };
 
-  const handleMapPress = (coordinate: { latitude: number; longitude: number }) => {
-    setSelectedMapLocation(coordinate);
-    setShowAddPoint(true);
-  };
+  // координата по тапу
+  const handleMapPress = useCallback((coord: { latitude: number; longitude: number }) => {
+    if (coord && typeof coord.latitude === "number" && typeof coord.longitude === "number") {
+      setSelectedMapLocation({ latitude: coord.latitude, longitude: coord.longitude });
+    }
+  }, []);
 
-  const handleAddControlPoint = async () => {
-    const location = selectedMapLocation || (judgeLocation ? {
-      latitude: judgeLocation.coords.latitude,
-      longitude: judgeLocation.coords.longitude,
-    } : null);
+  // приоритезируем: тап → GPS судьи → null
+  const effectiveCoord = useMemo(() => {
+    if (selectedMapLocation) return selectedMapLocation;
+    if (judgeLocation?.coords) {
+      return { latitude: judgeLocation.coords.latitude, longitude: judgeLocation.coords.longitude };
+    }
+    return null;
+  }, [selectedMapLocation, judgeLocation]);
 
-    if (!location || !gameId) {
+  const latText = effectiveCoord?.latitude !== undefined ? effectiveCoord.latitude.toFixed(6) : "—";
+  const lonText = effectiveCoord?.longitude !== undefined ? effectiveCoord.longitude.toFixed(6) : "—";
+
+  const canSave = Boolean(effectiveCoord /* && gameId */);
+
+  const onSavePoint = async () => {
+    if (!effectiveCoord || !gameId) {
       Alert.alert("Ошибка", "Местоположение не определено или игра не создана");
       return;
     }
 
     try {
       await createControlPoint({
-        gameId,
+        gameId: gameId!,
         type: newPointType,
-        latitude: location.latitude,
-        longitude: location.longitude,
+        latitude: effectiveCoord.latitude,
+        longitude: effectiveCoord.longitude,
         content: {
           qr: newPointContent.qr || undefined,
           hint: newPointContent.hint || undefined,
           symbol: newPointContent.symbol || undefined,
         },
+        chain: newPointType === "sequential"
+          ? { id: `chain-${Date.now()}`, order: 0, nextPointId: nextPointId || undefined }
+          : undefined,
       });
 
-      setShowAddPoint(false);
+  setShowAddPoint(false);
       setSelectedMapLocation(null);
-      setNewPointContent({ qr: "", hint: "", symbol: "🚩" });
+  setNewPointContent({ qr: "", hint: "", symbol: "🚩" });
+  setNextPointId(null);
       
       if (Platform.OS !== "web") {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -211,6 +232,30 @@ export default function JudgeScreen() {
 
   const symbols = ["🚩", "⭐", "🎯", "📍", "🔥", "💎", "🏆", "⚡"];
 
+  const handleMarkAsStart = async (point: ControlPoint) => {
+    if (!gameId) return;
+    if (point.type !== "sequential") return;
+    try {
+      await setStartSequential({ gameId, pointId: point._id });
+      if (Platform.OS !== "web") {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch (e) {
+      Alert.alert("Ошибка", "Не удалось назначить стартовую точку");
+    }
+  };
+
+  const handleSetNextPoint = async (point: ControlPoint, nextId: Id<"controlPoints"> | undefined) => {
+    try {
+      await updateChain({ pointId: point._id, nextPointId: nextId });
+      if (Platform.OS !== "web") {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch (e) {
+      Alert.alert("Ошибка", "Не удалось обновить цепочку");
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -238,8 +283,10 @@ export default function JudgeScreen() {
                 longitude: judgeLocation.coords.longitude,
               } : null}
               controlPoints={controlPoints}
-              isJudgeMode={true}
+              isJudgeMode
               onMapPress={handleMapPress}
+              focusPointId={focusPointId}
+              onEditPoint={(p: ControlPoint) => setEditPoint(p)}
             />
           ) : (
             <View style={styles.mapFallback}>
@@ -250,7 +297,7 @@ export default function JudgeScreen() {
               {judgeLocation && (
                 <View style={styles.locationInfo}>
                   <Text style={styles.locationTitle}>📍 Позиция судьи:</Text>
-                  <Text style={styles.locationText}>
+                  <Text style={styles.locationTextDim}>
                     {judgeLocation.coords.latitude.toFixed(6)}, {judgeLocation.coords.longitude.toFixed(6)}
                   </Text>
                 </View>
@@ -262,7 +309,6 @@ export default function JudgeScreen() {
           <TouchableOpacity
             style={styles.fabButton}
             onPress={() => setShowAddPoint(true)}
-            disabled={!judgeLocation}
           >
             <Text style={styles.fabText}>+</Text>
           </TouchableOpacity>
@@ -280,13 +326,13 @@ export default function JudgeScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>📍 Местоположение судьи</Text>
             {isLocationLoading ? (
-              <Text style={styles.locationText}>Определение местоположения...</Text>
+              <Text style={styles.locationTextDim}>Определение местоположения...</Text>
             ) : judgeLocation ? (
               <View>
-                <Text style={styles.locationText}>
+                <Text style={styles.locationTextDim}>
                   Широта: {judgeLocation.coords.latitude.toFixed(6)}
                 </Text>
-                <Text style={styles.locationText}>
+                <Text style={styles.locationTextDim}>
                   Долгота: {judgeLocation.coords.longitude.toFixed(6)}
                 </Text>
                 <Text style={styles.accuracyText}>
@@ -356,7 +402,20 @@ export default function JudgeScreen() {
               </View>
 
               {controlPoints.map((point, index) => (
-                <View key={point._id} style={styles.pointCard}>
+                <TouchableOpacity key={point._id} style={styles.pointCard} activeOpacity={0.8}
+                  onPress={() => {
+                    // Open simple inline action sheet: Focus or Edit
+                    Alert.alert(
+                      `${point.content.symbol || "📍"} Точка ${index + 1}`,
+                      `${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}`,
+                      [
+                        { text: "К точке", onPress: () => { setShowMap(true); setFocusPointId(point._id); } },
+                        { text: "Изменить", onPress: () => setEditPoint(point) },
+                        { text: "Отмена", style: "cancel" },
+                      ]
+                    );
+                  }}
+                >
                   <View style={styles.pointHeader}>
                     <Text style={styles.pointTitle}>
                       {point.content.symbol || "📍"} Точка {index + 1}
@@ -388,7 +447,24 @@ export default function JudgeScreen() {
                   <Text style={styles.pointCoords}>
                     📍 {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
                   </Text>
-                </View>
+                  {point.type === "sequential" && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={styles.locationTextDim}>Следующая: {point.chain?.nextPointId ? String(point.chain.nextPointId) : "—"}</Text>
+                      {/* Простая смена “следующей” из существующих */}
+                      {controlPoints.filter(p => p._id !== point._id).slice(0, 3).map(p => (
+                        <TouchableOpacity
+                          key={p._id}
+                          style={[styles.typeButton, point.chain?.nextPointId === p._id && styles.typeButtonActive]}
+                          onPress={() => handleSetNextPoint(point, point.chain?.nextPointId === p._id ? undefined : p._id)}
+                        >
+                          <Text style={[styles.typeButtonText, point.chain?.nextPointId === p._id && styles.typeButtonTextActive]}>
+                            Сделать следующей: {p.content.symbol || "📍"} {p.latitude.toFixed(5)}, {p.longitude.toFixed(5)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </TouchableOpacity>
               ))}
 
               {controlPoints.length === 0 && (
@@ -424,7 +500,8 @@ export default function JudgeScreen() {
             </Text>
             <TouchableOpacity
               style={styles.modalSaveButton}
-              onPress={handleAddControlPoint}
+              onPress={onSavePoint}
+              disabled={!canSave}
             >
               <Text style={styles.modalSaveText}>Сохранить</Text>
             </TouchableOpacity>
@@ -494,6 +571,30 @@ export default function JudgeScreen() {
               </View>
             </View>
 
+            {/* Chain next point selection for sequential */}
+            {newPointType === "sequential" && (
+              <View style={styles.formSection}>
+                <Text style={styles.formLabel}>Следующая точка (опционально):</Text>
+                <View>
+                  {controlPoints.length === 0 ? (
+                    <Text style={styles.locationTextDim}>Нет доступных точек для выбора.</Text>
+                  ) : (
+                    controlPoints.map((p) => (
+                      <TouchableOpacity
+                        key={p._id}
+                        style={[styles.typeButton, nextPointId === p._id && styles.typeButtonActive]}
+                        onPress={() => setNextPointId(prev => prev === p._id ? null : p._id)}
+                      >
+                        <Text style={[styles.typeButtonText, nextPointId === p._id && styles.typeButtonTextActive]}>
+                          {p.content.symbol || "📍"} {p.latitude.toFixed(5)}, {p.longitude.toFixed(5)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </View>
+              </View>
+            )}
+
             {/* Hint */}
             <View style={styles.formSection}>
               <Text style={styles.formLabel}>Подсказка:</Text>
@@ -518,6 +619,63 @@ export default function JudgeScreen() {
                 placeholderTextColor="#666666"
               />
             </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Edit Point Modal */}
+      <Modal visible={!!editPoint} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity style={styles.modalCloseButton} onPress={() => setEditPoint(null)}>
+              <Text style={styles.modalCloseText}>Отмена</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Изменить точку</Text>
+            <TouchableOpacity style={styles.modalSaveButton}
+              onPress={async () => {
+                if (!editPoint) return;
+                try {
+                  await updatePoint({ pointId: editPoint._id, content: editPoint.content });
+                  setEditPoint(null);
+                  if (Platform.OS !== "web") {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                } catch (e) {
+                  Alert.alert("Ошибка", "Не удалось сохранить изменения");
+                }
+              }}
+            >
+              <Text style={styles.modalSaveText}>Сохранить</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.modalContent}>
+            {editPoint && (
+              <View>
+                <Text style={styles.formLabel}>Координаты:</Text>
+                <Text style={styles.coordinatesText}>📍 {editPoint.latitude.toFixed(6)}, {editPoint.longitude.toFixed(6)}</Text>
+                <View style={{ height: 16 }} />
+                <Text style={styles.formLabel}>Символ:</Text>
+                <View style={styles.symbolSelector}>
+                  {symbols.map(symbol => (
+                    <TouchableOpacity key={symbol} style={[styles.symbolButton, (editPoint.content.symbol||"🚩")===symbol && styles.symbolButtonActive]}
+                      onPress={() => setEditPoint({ ...editPoint, content: { ...editPoint.content, symbol } })}
+                    >
+                      <Text style={styles.symbolText}>{symbol}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={{ height: 16 }} />
+                <Text style={styles.formLabel}>Подсказка:</Text>
+                <TextInput style={styles.textInput} value={editPoint.content.hint || ""}
+                  onChangeText={(text) => setEditPoint({ ...editPoint, content: { ...editPoint.content, hint: text } })}
+                  placeholder="Введите подсказку" placeholderTextColor="#666" multiline />
+                <View style={{ height: 16 }} />
+                <Text style={styles.formLabel}>QR-код (текст):</Text>
+                <TextInput style={styles.textInput} value={editPoint.content.qr || ""}
+                  onChangeText={(text) => setEditPoint({ ...editPoint, content: { ...editPoint.content, qr: text } })}
+                  placeholder="Текст QR" placeholderTextColor="#666" />
+              </View>
+            )}
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -741,6 +899,20 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     fontSize: 16,
   },
+  chainButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#2C2C2E",
+    borderRadius: 6,
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: "#3a3a3c",
+  },
+  chainButtonText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   pointHint: {
     color: "#CCCCCC",
     fontSize: 14,
@@ -888,7 +1060,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 8,
   },
-  locationText: {
+  locationTextDim: {
     color: "#CCCCCC",
     fontSize: 14,
   },

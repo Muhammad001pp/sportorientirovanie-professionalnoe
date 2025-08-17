@@ -46,7 +46,30 @@ export const getAnyActiveGame = query({
 export const activateGame = mutation({
   args: { gameId: v.id("games") },
   handler: async (ctx, args) => {
+    // Mark the game as active
     await ctx.db.patch(args.gameId, { isActive: true });
+
+    // Ensure there's a visible starting point for players when all points are sequential
+    const points = await ctx.db
+      .query("controlPoints")
+      .withIndex("by_game", (q) => q.eq("gameId", args.gameId))
+      .collect();
+
+    // If at least one sequential point exists and none of them is active yet,
+    // activate the first point in the chain (or the first sequential as a fallback)
+    const sequentialPoints = points.filter((p: any) => p.type === "sequential");
+    const hasActiveSequential = sequentialPoints.some((p: any) => p.isActive);
+
+    if (sequentialPoints.length > 0 && !hasActiveSequential) {
+      const nextIds = new Set(
+        sequentialPoints
+          .map((p: any) => p.chain?.nextPointId)
+          .filter((id: any) => Boolean(id))
+      );
+      // Start point = sequential point that is not referenced as someone else's nextPointId
+      const startPoint = sequentialPoints.find((p: any) => !nextIds.has(p._id)) || sequentialPoints[0];
+      await ctx.db.patch(startPoint._id, { isActive: true });
+    }
   },
 });
 

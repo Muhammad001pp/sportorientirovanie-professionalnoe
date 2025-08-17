@@ -70,3 +70,38 @@ export const updateControlPoint = mutation({
     await ctx.db.patch(args.pointId, { content: args.content });
   },
 });
+
+export const updateControlPointChain = mutation({
+  args: {
+    pointId: v.id("controlPoints"),
+    nextPointId: v.optional(v.id("controlPoints")),
+  },
+  handler: async (ctx, args) => {
+    const point = await ctx.db.get(args.pointId);
+    if (!point) return;
+    const newChain = {
+      id: point.chain?.id || `chain-${Date.now()}`,
+      order: point.chain?.order || 0,
+      nextPointId: args.nextPointId,
+    } as any;
+    await ctx.db.patch(args.pointId, { chain: newChain });
+  },
+});
+
+export const setStartSequentialPoint = mutation({
+  args: { gameId: v.id("games"), pointId: v.id("controlPoints") },
+  handler: async (ctx, args) => {
+    // Deactivate all sequential points for this game
+    const points = await ctx.db
+      .query("controlPoints")
+      .withIndex("by_game", (q) => q.eq("gameId", args.gameId))
+      .collect();
+    const sequential = points.filter((p: any) => p.type === "sequential");
+
+    await Promise.all(
+      sequential.map((p: any) =>
+        ctx.db.patch(p._id, { isActive: p._id === args.pointId })
+      )
+    );
+  },
+});
