@@ -13,8 +13,21 @@ export const createGame = mutation({
       isActive: false,
       minPoints: 3,
       createdAt: Date.now(),
+  reviewStatus: "draft",
     });
     return gameId;
+  },
+});
+
+// List games created by a specific judge
+export const listJudgeGames = query({
+  args: { judgeId: v.string() },
+  handler: async (ctx, { judgeId }) => {
+    const games = await ctx.db
+      .query("games")
+      .withIndex("by_judge", (q) => q.eq("judgeId", judgeId))
+      .collect();
+    return games.sort((a: any, b: any) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   },
 });
 
@@ -40,6 +53,136 @@ export const getAnyActiveGame = query({
       .first();
     
     return activeGames;
+  },
+});
+
+export const getGameById = query({
+  args: { gameId: v.id("games") },
+  handler: async (ctx, { gameId }) => {
+    return await ctx.db.get(gameId);
+  },
+});
+
+// Update metadata for a game (map)
+export const updateGameMeta = mutation({
+  args: {
+    gameId: v.id("games"),
+    title: v.string(),
+    description: v.string(),
+    area: v.object({
+      country: v.optional(v.string()),
+      region: v.optional(v.string()),
+      city: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.gameId, {
+      title: args.title,
+      description: args.description,
+      area: args.area,
+    });
+  },
+});
+
+// Admin-only: update game meta
+export const adminUpdateGameMeta = mutation({
+  args: {
+    adminKey: v.string(),
+    gameId: v.id("games"),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    area: v.optional(v.object({
+      country: v.optional(v.string()),
+      region: v.optional(v.string()),
+      city: v.optional(v.string()),
+    })),
+    isActive: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { adminKey, gameId, ...patch }) => {
+    if (adminKey !== process.env.ADMIN_KEY) throw new Error("Forbidden");
+    await ctx.db.patch(gameId, patch as any);
+  },
+});
+
+// Publish or unpublish a game to the store
+export const publishGame = mutation({
+  args: { gameId: v.id("games"), published: v.boolean() },
+  handler: async (ctx, { gameId, published }) => {
+    await ctx.db.patch(gameId, { published });
+  },
+});
+
+// Judge: submit game for moderation (moves to in_review)
+export const submitGameForReview = mutation({
+  args: { gameId: v.id("games") },
+  handler: async (ctx, { gameId }) => {
+    await ctx.db.patch(gameId, { reviewStatus: "in_review" });
+  },
+});
+
+// List published games for the store
+export const listPublishedGames = query({
+  args: {},
+  handler: async (ctx) => {
+    // Prefer index when available
+    let items: any[] = [];
+    try {
+      items = await ctx.db
+        .query("games")
+        .withIndex("by_published", (q) => q.eq("published", true))
+        .collect();
+    } catch (e) {
+      const all = await ctx.db.query("games").collect();
+      items = all.filter((g: any) => g.published === true);
+    }
+  // Only approved games appear in store
+  const approved = items.filter((g: any) => g.reviewStatus === "approved");
+  return approved.map((g: any) => ({
+      _id: g._id,
+      title: g.title ?? g.name ?? "Без названия",
+      description: g.description ?? "",
+      area: g.area ?? {},
+      createdBy: g.judgeId,
+      isActive: g.isActive,
+      _creationTime: g._creationTime,
+    }));
+  },
+});
+
+// Admin: list games with optional review status filter
+export const listGamesByReviewStatus = query({
+  args: { status: v.optional(v.union(v.literal("draft"), v.literal("in_review"), v.literal("approved"), v.literal("rejected"))) },
+  handler: async (ctx, { status }) => {
+    const all = await ctx.db.query("games").collect();
+    if (!status) return all;
+    return all.filter((g: any) => g.reviewStatus === status);
+  },
+});
+
+// Admin: set review status (requires ADMIN_KEY)
+export const setGameReviewStatus = mutation({
+  args: {
+    adminKey: v.string(),
+    gameId: v.id("games"),
+    reviewStatus: v.union(
+      v.literal("draft"),
+      v.literal("in_review"),
+      v.literal("approved"),
+      v.literal("rejected")
+    ),
+  },
+  handler: async (ctx, { adminKey, gameId, reviewStatus }) => {
+    if (adminKey !== process.env.ADMIN_KEY) throw new Error("Forbidden");
+    await ctx.db.patch(gameId, { reviewStatus });
+  },
+});
+
+// Admin: publish/unpublish a game (separate from review status)
+export const setGamePublished = mutation({
+  args: { adminKey: v.string(), gameId: v.id("games"), published: v.boolean() },
+  handler: async (ctx, { adminKey, gameId, published }) => {
+    if (adminKey !== process.env.ADMIN_KEY) throw new Error("Forbidden");
+    await ctx.db.patch(gameId, { published });
   },
 });
 
@@ -77,6 +220,20 @@ export const deactivateGame = mutation({
   args: { gameId: v.id("games") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.gameId, { isActive: false });
+  },
+});
+
+export const deleteGame = mutation({
+  args: { gameId: v.id("games") },
+  handler: async (ctx, { gameId }) => {
+    // Delete control points first
+    const points = await ctx.db
+      .query("controlPoints")
+      .withIndex("by_game", (q) => q.eq("gameId", gameId))
+      .collect();
+    await Promise.all(points.map((p: any) => ctx.db.delete(p._id)));
+    // Delete game
+    await ctx.db.delete(gameId);
   },
 });
 

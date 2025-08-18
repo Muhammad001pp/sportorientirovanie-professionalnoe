@@ -9,7 +9,11 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest --watchAll",
-    "lint": "expo lint"
+    "lint": "expo lint",
+  "dev:all": "concurrently -c \"blue,magenta,green\" -n \"convex,expo,admin\" \"npx convex dev\" \"npx expo start\" \"npm --prefix admin run dev\"",
+  "dev:mac": "bash ./scripts/dev-all-mac.sh start",
+  "dev:mac:stop": "bash ./scripts/dev-all-mac.sh stop",
+  "dev:mac:restart": "bash ./scripts/dev-all-mac.sh restart"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -20,6 +24,7 @@
     "expo": "~53.0.9",
     "expo-blur": "~14.1.4",
     "expo-constants": "~17.1.6",
+    "expo-crypto": "^14.1.5",
     "expo-dev-client": "~5.2.4",
     "expo-font": "~13.3.1",
     "expo-haptics": "~14.1.4",
@@ -33,22 +38,24 @@
     "expo-symbols": "~0.4.4",
     "expo-system-ui": "~5.0.7",
     "expo-web-browser": "~14.2.0",
+    "js-sha256": "^0.11.1",
     "qrcode": "^1.5.4",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "react-native": "0.79.5",
     "react-native-gesture-handler": "~2.24.0",
+    "react-native-maps": "1.20.1",
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-web": "~0.20.0",
-    "react-native-webview": "13.13.5",
-    "react-native-maps": "1.20.1"
+    "react-native-webview": "13.13.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/qrcode": "^1.5.5",
     "@types/react": "~19.0.10",
+    "concurrently": "^9.2.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~9.2.0",
     "typescript": "~5.8.3"

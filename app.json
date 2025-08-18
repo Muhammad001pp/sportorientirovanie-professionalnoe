@@ -4,6 +4,7 @@
     "slug": "sportorientirovanie-professionalnoe",
     "version": "1.0.0",
     "orientation": "portrait",
+  "entryPoint": "./index.js",
   "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "light",
     "splash": {

@@ -8,9 +8,50 @@ export default defineSchema({
     isActive: v.boolean(),
     minPoints: v.number(),
     createdAt: v.number(),
+    // New metadata fields for "map store"
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    area: v.optional(v.object({
+      country: v.optional(v.string()),
+      region: v.optional(v.string()),
+      city: v.optional(v.string()),
+    })),
+    published: v.optional(v.boolean()),
+    reviewStatus: v.optional(
+      v.union(
+        v.literal("draft"),
+        v.literal("in_review"),
+        v.literal("approved"),
+        v.literal("rejected")
+      )
+    ),
   })
     .index("by_judge", ["judgeId"])
-    .index("by_active", ["isActive"]),
+    .index("by_active", ["isActive"]) 
+    .index("by_published", ["published"]),
+  
+  judges: defineTable({
+    deviceId: v.string(),
+    publicNick: v.string(),
+    fullName: v.string(),
+    phone: v.string(),
+    email: v.string(),
+    passwordHash: v.string(),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    createdAt: v.number(),
+  }).index("by_device", ["deviceId"]).index("by_status", ["status"]).index("by_nick", ["publicNick"]),
+
+  // Players register/login similar to judges
+  players: defineTable({
+    deviceId: v.string(),
+    publicNick: v.string(),
+    fullName: v.string(),
+    phone: v.string(),
+    email: v.string(),
+    passwordHash: v.string(),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    createdAt: v.number(),
+  }).index("by_device", ["deviceId"]).index("by_status", ["status"]).index("by_nick", ["publicNick"]),
   
   controlPoints: defineTable({
     gameId: v.id("games"),
@@ -41,5 +82,7 @@ export default defineSchema({
     isCompleted: v.boolean(),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
-  }).index("by_game_and_player", ["gameId", "playerId"]),
+  })
+    .index("by_game_and_player", ["gameId", "playerId"]) 
+    .index("by_player", ["playerId"]),
 });

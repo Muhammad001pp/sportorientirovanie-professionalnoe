@@ -47,12 +47,14 @@ interface ControlPoint {
 export default function JudgeScreen() {
   const [judgeLocation, setJudgeLocation] = useState<Location.LocationObject | null>(null);
   const [isLocationLoading, setIsLocationLoading] = useState(true);
+  const [isReverseGeoLoading, setIsReverseGeoLoading] = useState(false);
   const [controlPoints, setControlPoints] = useState<ControlPoint[]>([]);
   const [showAddPoint, setShowAddPoint] = useState(false);
   const [gameId, setGameId] = useState<Id<"games"> | null>(null);
   const [showMap, setShowMap] = useState(true);
   const [focusPointId, setFocusPointId] = useState<Id<"controlPoints"> | null>(null);
   const [editPoint, setEditPoint] = useState<ControlPoint | null>(null);
+  const [meta, setMeta] = useState<{ title: string; description: string; area: { city?: string; region?: string; country?: string } }>({ title: "", description: "", area: {} });
   
   // New point form state
   const [newPointType, setNewPointType] = useState<"visible" | "sequential">("visible");
@@ -63,6 +65,9 @@ export default function JudgeScreen() {
   });
   const [nextPointId, setNextPointId] = useState<Id<"controlPoints"> | null>(null);
   const [selectedMapLocation, setSelectedMapLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  // Режим позиционирования новой точки: отдельное состояние для перетаскиваемого маркера
+  const [placingLocation, setPlacingLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const placingRadiusMeters = 30;
 
   const judgeId = "judge_001"; // In real app, this would be from auth
   
@@ -78,10 +83,23 @@ export default function JudgeScreen() {
   const updateChain = useMutation(api.controlPoints.updateControlPointChain);
   const setStartSequential = useMutation(api.controlPoints.setStartSequentialPoint);
   const updatePoint = useMutation(api.controlPoints.updateControlPoint);
+  const updateGameMeta = useMutation(api.games.updateGameMeta);
+  const publishGame = useMutation(api.games.publishGame);
+  const submitForReview = useMutation(api.games.submitGameForReview);
 
   useEffect(() => {
     if (activeGame) {
       setGameId(activeGame._id);
+      // preload meta into local state if exists
+      setMeta({
+        title: (activeGame as any).title || "",
+        description: (activeGame as any).description || "",
+        area: {
+          country: (activeGame as any).area?.country || "",
+          region: (activeGame as any).area?.region || "",
+          city: (activeGame as any).area?.city || "",
+        },
+      });
     }
   }, [activeGame]);
 
@@ -93,6 +111,28 @@ export default function JudgeScreen() {
 
   useEffect(() => {
     getCurrentLocation();
+  }, []);
+
+  // Обратное геокодирование и автозаполнение области карты (город/регион/страна)
+  const fillAreaFromCoords = useCallback(async (lat: number, lon: number) => {
+    setIsReverseGeoLoading(true);
+    try {
+      const results = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lon });
+      const first = results?.[0];
+      if (first) {
+        const city = first.city || (first as any).subregion || first.name || "";
+        const region = first.region || (first as any).subregion || "";
+        const country = first.country || "";
+        setMeta((m) => ({
+          ...m,
+          area: { city: city || undefined, region: region || undefined, country: country || undefined },
+        }));
+      }
+    } catch (e) {
+      console.warn("reverseGeocode failed", e);
+    } finally {
+      setIsReverseGeoLoading(false);
+    }
   }, []);
 
   const getCurrentLocation = async () => {
@@ -107,6 +147,8 @@ export default function JudgeScreen() {
         accuracy: Location.Accuracy.BestForNavigation,
       });
       setJudgeLocation(location);
+  // Всегда обновляем адрес по текущим координатам устройства
+  fillAreaFromCoords(location.coords.latitude, location.coords.longitude);
     } catch (error) {
       Alert.alert("Ошибка", "Не удалось получить местоположение");
     } finally {
@@ -124,7 +166,7 @@ export default function JudgeScreen() {
       if (Platform.OS !== "web") {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       }
-      Alert.alert("Успех", "Новая игра создана!");
+  Alert.alert("Успех", "Новая карта создана!");
     } catch (error) {
       Alert.alert("Ошибка", "Не удалось создать игру");
     }
@@ -134,12 +176,14 @@ export default function JudgeScreen() {
   const handleMapPress = useCallback((coord: { latitude: number; longitude: number }) => {
     if (coord && typeof coord.latitude === "number" && typeof coord.longitude === "number") {
       setSelectedMapLocation({ latitude: coord.latitude, longitude: coord.longitude });
+  // при первом тапе создаем точку для перетаскивания
+  setPlacingLocation({ latitude: coord.latitude, longitude: coord.longitude });
     }
   }, []);
 
   // приоритезируем: тап → GPS судьи → null
   const effectiveCoord = useMemo(() => {
-    if (selectedMapLocation) return selectedMapLocation;
+  if (selectedMapLocation) return selectedMapLocation;
     if (judgeLocation?.coords) {
       return { latitude: judgeLocation.coords.latitude, longitude: judgeLocation.coords.longitude };
     }
@@ -150,9 +194,11 @@ export default function JudgeScreen() {
   const lonText = effectiveCoord?.longitude !== undefined ? effectiveCoord.longitude.toFixed(6) : "—";
 
   const canSave = Boolean(effectiveCoord /* && gameId */);
+  const isAreaReady = Boolean((meta.area.country || "").trim());
 
   const onSavePoint = async () => {
-    if (!effectiveCoord || !gameId) {
+  const coordToSave = placingLocation || effectiveCoord;
+  if (!coordToSave || !gameId) {
       Alert.alert("Ошибка", "Местоположение не определено или игра не создана");
       return;
     }
@@ -161,8 +207,8 @@ export default function JudgeScreen() {
       await createControlPoint({
         gameId: gameId!,
         type: newPointType,
-        latitude: effectiveCoord.latitude,
-        longitude: effectiveCoord.longitude,
+    latitude: coordToSave.latitude,
+    longitude: coordToSave.longitude,
         content: {
           qr: newPointContent.qr || undefined,
           hint: newPointContent.hint || undefined,
@@ -175,6 +221,7 @@ export default function JudgeScreen() {
 
   setShowAddPoint(false);
       setSelectedMapLocation(null);
+  setPlacingLocation(null);
   setNewPointContent({ qr: "", hint: "", symbol: "🚩" });
   setNextPointId(null);
       
@@ -224,7 +271,7 @@ export default function JudgeScreen() {
       if (Platform.OS !== "web") {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-      Alert.alert("Успех", "Игра активирована! Игроки могут начать участие.");
+  Alert.alert("Успех", "Карта активирована! Игроки могут начать участие.");
     } catch (error) {
       Alert.alert("Ошибка", "Не удалось активировать игру");
     }
@@ -274,7 +321,7 @@ export default function JudgeScreen() {
         </TouchableOpacity>
       </View>
 
-      {showMap ? (
+  {showMap ? (
         <View style={styles.mapContainer}>
           {GameMapView ? (
             <GameMapView
@@ -287,6 +334,12 @@ export default function JudgeScreen() {
               onMapPress={handleMapPress}
               focusPointId={focusPointId}
               onEditPoint={(p: ControlPoint) => setEditPoint(p)}
+              placingLocation={placingLocation}
+              onPlacingLocationChange={(c: { latitude: number; longitude: number }) => {
+                setPlacingLocation(c);
+                setSelectedMapLocation(c);
+              }}
+              placingRadiusMeters={placingRadiusMeters}
             />
           ) : (
             <View style={styles.mapFallback}>
@@ -308,10 +361,24 @@ export default function JudgeScreen() {
           {/* Floating Action Button */}
           <TouchableOpacity
             style={styles.fabButton}
-            onPress={() => setShowAddPoint(true)}
+            onPress={() => {
+              // включаем режим постановки точки: берем старт из позиции судьи
+              const start = judgeLocation?.coords
+                ? { latitude: judgeLocation.coords.latitude, longitude: judgeLocation.coords.longitude }
+                : selectedMapLocation || null;
+              setPlacingLocation(start);
+              if (start) setSelectedMapLocation(start);
+              setShowAddPoint(true);
+            }}
           >
             <Text style={styles.fabText}>+</Text>
           </TouchableOpacity>
+
+          {showAddPoint && (
+            <View style={[styles.quickStats, { bottom: 90 }]}>
+              <Text style={styles.quickStatsText}>Режим постановки точки: перетащите серый маркер (≤ {placingRadiusMeters}м)</Text>
+            </View>
+          )}
 
           {/* Quick Stats */}
           <View style={styles.quickStats}>
@@ -322,6 +389,58 @@ export default function JudgeScreen() {
         </View>
       ) : (
         <ScrollView style={styles.content}>
+          {/* Game Meta */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>🗺️ Информация о карте</Text>
+            <Text style={styles.locationText}>Название</Text>
+            <TextInput style={styles.textInput} value={meta.title}
+              onChangeText={(t) => setMeta({ ...meta, title: t })} placeholder="Название карты" placeholderTextColor="#666" />
+            <View style={{ height: 12 }} />
+            <Text style={styles.locationText}>Краткое описание</Text>
+            <TextInput style={[styles.textInput, { minHeight: 80 }]} multiline value={meta.description}
+              onChangeText={(t) => setMeta({ ...meta, description: t })} placeholder="О чем игра, формат, правила" placeholderTextColor="#666" />
+            <View style={{ height: 12 }} />
+            <Text style={styles.locationText}>Область (город / регион / страна) — 🔒 определяется автоматически по геолокации</Text>
+            <TextInput style={[styles.textInput, styles.lockedInput]} value={meta.area.city}
+              editable={false} selectTextOnFocus={false} placeholder="Город" placeholderTextColor="#666" />
+            <View style={{ height: 8 }} />
+            <TextInput style={[styles.textInput, styles.lockedInput]} value={meta.area.region}
+              editable={false} selectTextOnFocus={false} placeholder="Регион" placeholderTextColor="#666" />
+            <View style={{ height: 8 }} />
+            <TextInput style={[styles.textInput, styles.lockedInput]} value={meta.area.country}
+              editable={false} selectTextOnFocus={false} placeholder="Страна" placeholderTextColor="#666" />
+            <View style={{ height: 6 }} />
+            {isReverseGeoLoading ? (
+              <Text style={styles.locationTextDim}>Определяем адрес по GPS…</Text>
+            ) : !isAreaReady ? (
+              <Text style={styles.errorText}>Не удалось определить адрес. Уточните позицию ниже и попробуйте снова.</Text>
+            ) : null}
+            <View style={{ height: 12 }} />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity style={styles.createGameButton} disabled={!gameId || !isAreaReady}
+                onPress={async () => {
+                  if (!gameId) return;
+                  if (!isAreaReady) { Alert.alert("Адрес не определён", "Невозможно сохранить без корректной геолокации"); return; }
+                  await updateGameMeta({
+                    gameId,
+                    title: (meta.title || "").trim() || "Без названия",
+                    description: (meta.description || "").trim(),
+                    area: {
+                      city: meta.area.city?.trim() || undefined,
+                      region: meta.area.region?.trim() || undefined,
+                      country: meta.area.country?.trim() || undefined,
+                    },
+                  });
+                  Alert.alert("Сохранено", "Метаданные карты обновлены");
+                }}>
+                <Text style={styles.createGameButtonText}>Сохранить</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.startGameButton, { backgroundColor: "#5856D6" }]} disabled={!gameId || !isAreaReady}
+                onPress={async () => { if (!gameId) return; if (!isAreaReady) { Alert.alert('Адрес не определён', 'Укажите корректную геолокацию (город/регион/страна).'); return; } await submitForReview({ gameId }); Alert.alert('Отправлено', 'Карта отправлена на модерацию. Публикация произойдёт после одобрения администратором.'); }}>
+                <Text style={styles.startGameButtonText}>Отправить на модерацию</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
           {/* Location Status */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>📍 Местоположение судьи</Text>
@@ -501,19 +620,24 @@ export default function JudgeScreen() {
             <TouchableOpacity
               style={styles.modalSaveButton}
               onPress={onSavePoint}
-              disabled={!canSave}
+              disabled={!((placingLocation || effectiveCoord) && gameId)}
             >
               <Text style={styles.modalSaveText}>Сохранить</Text>
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.modalContent}>
-            {selectedMapLocation && (
+            {(placingLocation || selectedMapLocation) && (
               <View style={styles.formSection}>
                 <Text style={styles.formLabel}>Координаты:</Text>
                 <Text style={styles.coordinatesText}>
-                  📍 {selectedMapLocation.latitude.toFixed(6)}, {selectedMapLocation.longitude.toFixed(6)}
+                  📍 {(placingLocation || selectedMapLocation)!.latitude.toFixed(6)}, {(placingLocation || selectedMapLocation)!.longitude.toFixed(6)}
                 </Text>
+                {judgeLocation?.coords && (
+                  <Text style={styles.locationTextDim}>
+                    Перемещайте маркер на карте. Допустимое смещение: не более {placingRadiusMeters}м от вашей позиции.
+                  </Text>
+                )}
               </View>
             )}
 
@@ -1028,6 +1152,9 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     minHeight: 44,
+  },
+  lockedInput: {
+    opacity: 0.7,
   },
   mapFallback: {
     flex: 1,

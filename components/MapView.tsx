@@ -33,6 +33,10 @@ interface GameMapViewProps {
   onMapPress?: (coordinate: { latitude: number; longitude: number }) => void;
   onEditPoint?: (point: ControlPoint) => void;
   focusPointId?: Id<"controlPoints"> | null;
+  // Режим постановки новой точки: координаты маркера и колбэк при перетаскивании
+  placingLocation?: { latitude: number; longitude: number } | null;
+  onPlacingLocationChange?: (coordinate: { latitude: number; longitude: number }) => void;
+  placingRadiusMeters?: number; // радиус ограничения от userLocation, по умолчанию 30м
 }
 
 const getMarkerColor = (point: ControlPoint, foundPoints: Id<"controlPoints">[] = []) => {
@@ -62,17 +66,77 @@ const GameMapView: React.FC<GameMapViewProps> = ({
   onMapPress,
   onEditPoint,
   focusPointId,
+  placingLocation,
+  onPlacingLocationChange,
+  placingRadiusMeters = 30,
 }) => {
   const [lastTap, setLastTap] = React.useState<{ latitude: number; longitude: number } | null>(null);
   const mapRef = React.useRef<MapView | null>(null);
   const [currentRegion, setCurrentRegion] = React.useState<Region | null>(null);
+  const didCenterPlacingRef = React.useRef(false);
 
   const handleMapPress = (e: any) => {
     const coord = e?.nativeEvent?.coordinate;
     if (coord) {
       setLastTap(coord);
       onMapPress?.(coord);
+      // Если активно позиционирование новой точки — применим ограничение и сдвинем маркер
+      if (isJudgeMode && userLocation && placingLocation && onPlacingLocationChange) {
+        const clamped = clampToRadius(userLocation, coord, placingRadiusMeters);
+        onPlacingLocationChange(clamped);
+      }
     }
+  };
+
+  const handleMapLongPress = (e: any) => {
+    const coord = e?.nativeEvent?.coordinate;
+    if (!coord) return;
+    if (isJudgeMode && userLocation && onPlacingLocationChange) {
+      const clamped = clampToRadius(userLocation, coord, placingRadiusMeters);
+      onPlacingLocationChange(clamped);
+    }
+  };
+
+  // Геометрия: расстояние/ограничение по радиусу
+  const toRad = (x: number) => (x * Math.PI) / 180;
+  const distanceMeters = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) => {
+    const R = 6371000; // m
+    const dLat = toRad(b.latitude - a.latitude);
+    const dLon = toRad(b.longitude - a.longitude);
+    const lat1 = toRad(a.latitude);
+    const lat2 = toRad(b.latitude);
+    const sinDLat = Math.sin(dLat / 2);
+    const sinDLon = Math.sin(dLon / 2);
+    const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+    const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    return R * c;
+  };
+  const clampToRadius = (
+    center: { latitude: number; longitude: number },
+    p: { latitude: number; longitude: number },
+    radiusM: number
+  ) => {
+    const d = distanceMeters(center, p);
+    if (d <= radiusM || d === 0) return p;
+    // вычисляем азимут и возвращаем точку на окружности
+    const φ1 = toRad(center.latitude);
+    const λ1 = toRad(center.longitude);
+    const φ2 = toRad(p.latitude);
+    const λ2 = toRad(p.longitude);
+    const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
+    const bearing = Math.atan2(y, x);
+    const δ = radiusM / 6371000; // угловое расстояние
+    const φ = Math.asin(
+      Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(bearing)
+    );
+    const λ =
+      λ1 +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(δ) * Math.cos(φ1),
+        Math.cos(δ) - Math.sin(φ1) * Math.sin(φ)
+      );
+    return { latitude: (φ * 180) / Math.PI, longitude: (λ * 180) / Math.PI };
   };
 
   // Compute chain order numbers for sequential points (start at 1 per chain)
@@ -146,6 +210,26 @@ const GameMapView: React.FC<GameMapViewProps> = ({
       </Marker>
     );
   };
+
+  // Автоцентрирование на маркер постановки точки ОДИН РАЗ, сохраняя текущий масштаб пользователя
+  React.useEffect(() => {
+    if (!placingLocation || !mapRef.current) return;
+    if (didCenterPlacingRef.current) return; // уже центрировали — не трогаем масштаб пользователя
+    if (!currentRegion) return; // ждём, пока появится текущий регион (масштаб)
+    const next: Region = {
+      latitude: placingLocation.latitude,
+      longitude: placingLocation.longitude,
+      latitudeDelta: currentRegion.latitudeDelta,
+      longitudeDelta: currentRegion.longitudeDelta,
+    };
+    didCenterPlacingRef.current = true;
+    mapRef.current.animateToRegion(next, 120);
+  }, [placingLocation, currentRegion]);
+
+  // Сброс флага при выходе из режима постановки
+  React.useEffect(() => {
+    if (!placingLocation) didCenterPlacingRef.current = false;
+  }, [placingLocation]);
 
   // Web fallback (same as before)
   if (Platform.OS === 'web') {
@@ -254,19 +338,30 @@ const GameMapView: React.FC<GameMapViewProps> = ({
         showsUserLocation={Boolean(userLocation)}
         followsUserLocation={!isJudgeMode}
         onPress={handleMapPress}
+  onLongPress={handleMapLongPress}
   onRegionChangeComplete={(r) => setCurrentRegion(r)}
         mapType="standard"
       >
+          {/* Зона перетаскивания для постановки новой точки (для судьи) */}
+      {isJudgeMode && userLocation && placingLocation && (
+            <Circle
+              center={userLocation}
+              radius={placingRadiusMeters}
+              strokeColor="rgba(0,122,255,0.5)"
+              fillColor="rgba(0,122,255,0.08)"
+              strokeWidth={2}
+        zIndex={1}
+            />
+          )}
           {/* Контрольные точки */}
-          {controlPoints.map((point, index) => {
+      {controlPoints.map((point, index) => {
             // For players: hide sequential points until they become active or are already found
             if (!isJudgeMode && point.type === "sequential" && !point.isActive && !foundPoints.includes(point._id)) {
               return null;
             }
             return (
-              <>
+        <React.Fragment key={String(point._id)}>
               <Marker
-                key={point._id}
                 coordinate={{ latitude: point.latitude, longitude: point.longitude }}
                 title={getMarkerTitle(point, index, foundPoints)}
                 description={point.content.hint || "Контрольная точка"}
@@ -276,7 +371,7 @@ const GameMapView: React.FC<GameMapViewProps> = ({
                   e.stopPropagation?.();
                 }}
               >
-                {isJudgeMode && (
+                {isJudgeMode && !placingLocation && (
                   <Callout tooltip={true}>
                     <View style={styles.callout}>
                       <TouchableOpacity style={styles.calloutBtn} onPress={() => focusPoint(point)}>
@@ -290,7 +385,7 @@ const GameMapView: React.FC<GameMapViewProps> = ({
                 )}
               </Marker>
               {isJudgeMode && point.type === 'sequential' && renderSeqNumber(point)}
-              </>
+        </React.Fragment>
             );
           })}
 
@@ -312,6 +407,29 @@ const GameMapView: React.FC<GameMapViewProps> = ({
               title="👨‍⚖️ Позиция судьи"
               description="Текущее местоположение"
               pinColor="#007AFF"
+            />
+          )}
+
+          {/* Перетаскиваемый маркер постановки новой точки (ограничение радиусом) */}
+          {isJudgeMode && userLocation && placingLocation && (
+            <Marker
+              coordinate={placingLocation}
+              draggable
+              pinColor="#8E8E93"
+              title="Новая точка"
+              description={`Перетащите в радиусе ${placingRadiusMeters}м от вашей позиции`}
+              onDrag={(e) => {
+                const next = e?.nativeEvent?.coordinate;
+                if (!next) return;
+                const clamped = clampToRadius(userLocation, next, placingRadiusMeters);
+                onPlacingLocationChange?.(clamped);
+              }}
+              onDragEnd={(e) => {
+                const next = e?.nativeEvent?.coordinate;
+                if (!next) return;
+                const clamped = clampToRadius(userLocation, next, placingRadiusMeters);
+                onPlacingLocationChange?.(clamped);
+              }}
             />
           )}
   </MapView>

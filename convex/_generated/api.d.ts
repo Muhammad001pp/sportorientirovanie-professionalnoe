@@ -15,7 +15,9 @@ import type {
 } from "convex/server";
 import type * as controlPoints from "../controlPoints.js";
 import type * as games from "../games.js";
+import type * as judges from "../judges.js";
 import type * as playerProgress from "../playerProgress.js";
+import type * as players from "../players.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -28,7 +30,9 @@ import type * as playerProgress from "../playerProgress.js";
 declare const fullApi: ApiFromModules<{
   controlPoints: typeof controlPoints;
   games: typeof games;
+  judges: typeof judges;
   playerProgress: typeof playerProgress;
+  players: typeof players;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
