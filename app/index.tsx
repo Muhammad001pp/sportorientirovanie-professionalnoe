@@ -20,6 +20,7 @@ import { sha256 } from "js-sha256";
 export default function Index() {
   const [isJudgeMode, setIsJudgeMode] = useState(false);
   const [isPlayerMode, setIsPlayerMode] = useState(false);
+  const [showAbout, setShowAbout] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const deviceIdJudge = "device_local_judge_001"; // TODO: persist real device id
   const deviceIdPlayer = "device_local_player_001"; // TODO: persist real device id
@@ -271,6 +272,40 @@ export default function Index() {
           </View>
         )}
 
+        {/* About / Info section */}
+        <View style={styles.infoCard}>
+          <TouchableOpacity onPress={() => setShowAbout((v) => !v)}>
+            <Text style={styles.infoTitle}>ℹ️ О приложении</Text>
+          </TouchableOpacity>
+          {showAbout && (
+            <>
+              <Text style={styles.infoText}>
+                SportOrienteering Pro — платформа для спортивного ориентирования с двумя ролями: судья и игрок. Судьи создают и публикуют карты с контрольными точками, игроки выбирают карту и проходят дистанцию в реальном мире.
+              </Text>
+
+              <Text style={styles.infoSubTitle}>Для игроков (🏃‍♂️):</Text>
+              <Text style={styles.infoBullet}>• Зарегистрируйтесь или войдите (или откройте магазин карт без входа).</Text>
+              <Text style={styles.infoBullet}>• В разделе «Магазин карт» выберите опубликованную карту и нажмите «Начать прохождение».</Text>
+              <Text style={styles.infoBullet}>• Разрешите доступ к геолокации. На экране игры вы увидите своё положение и точки на карте.</Text>
+              <Text style={styles.infoBullet}>• Отмечайте точки сканированием QR‑кода или подойдя к точке: засчитывается при приближении ≈ 30 м.</Text>
+              <Text style={styles.infoBullet}>• Последовательные точки открываются по цепочке — следующая активируется после отметки текущей.</Text>
+              <Text style={styles.infoBullet}>• Прогресс сохраняется. «Продолжить» — для незавершённых, «Пройденные карты» — завершённые.</Text>
+
+              <Text style={styles.infoSubTitle}>Для судей (👨‍⚖️):</Text>
+              <Text style={styles.infoBullet}>• Зарегистрируйтесь/войдите в режиме судьи и дождитесь одобрения профиля.</Text>
+              <Text style={styles.infoBullet}>• Создайте карту, добавьте контрольные точки (видимые/последовательные), задайте подсказки и QR.</Text>
+              <Text style={styles.infoBullet}>• Отправьте карту на модерацию, после одобрения опубликуйте — она появится в магазине.</Text>
+              <Text style={styles.infoBullet}>• Активируйте игру, чтобы последовательные точки стали доступны игрокам (первая в цепочке включится автоматически).</Text>
+              <Text style={styles.infoBullet}>• В админ‑панели доступна живая карта: позиции игроков и статус точек в реальном времени.</Text>
+
+              <Text style={styles.infoSubTitle}>Разрешения и требования:</Text>
+              <Text style={styles.infoBullet}>• Геолокация — для отслеживания позиции и расчёта расстояния до точек.</Text>
+              <Text style={styles.infoBullet}>• Камера — для сканирования QR‑кодов на контрольных точках.</Text>
+              <Text style={styles.infoBullet}>• Интернет — синхронизация прогресса и живые обновления через Convex.</Text>
+            </>
+          )}
+        </View>
+
         <View style={styles.footer}>
           <Text style={styles.footerText}>
             Выберите режим для начала работы
@@ -407,6 +442,39 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: '#fff',
+  },
+  infoCard: {
+    backgroundColor: '#1E1E1E',
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  infoTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  infoSubTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  infoText: {
+    color: '#BBBBBB',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  infoBullet: {
+    color: '#AAAAAA',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
   },
 });
 
