@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Text,
   View,
@@ -22,6 +22,8 @@ export default function Index() {
   const [isPlayerMode, setIsPlayerMode] = useState(false);
   const [showAbout, setShowAbout] = useState(true);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const scrollRef = useRef<ScrollView | null>(null);
+  const [infoTop, setInfoTop] = useState(0);
   const deviceIdJudge = "device_local_judge_001"; // TODO: persist real device id
   const deviceIdPlayer = "device_local_player_001"; // TODO: persist real device id
   const judge = useQuery(api.judges.getJudge, { deviceId: deviceIdJudge });
@@ -84,7 +86,7 @@ export default function Index() {
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+  <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <Text style={styles.title}>SportOrienteering Pro</Text>
           <Text style={styles.subtitle}>
@@ -265,15 +267,20 @@ export default function Index() {
             )}
             <TouchableOpacity
               style={[styles.loginButton, { marginTop: 12, backgroundColor: '#444' }]}
-              onPress={() => router.push('/store')}
+              onPress={() => {
+                setShowAbout(true);
+                requestAnimationFrame(() => {
+                  scrollRef.current?.scrollTo({ y: infoTop, animated: true });
+                });
+              }}
             >
-              <Text style={styles.loginButtonText}>Перейти в магазин карт без входа</Text>
+              <Text style={styles.loginButtonText}>О приложении</Text>
             </TouchableOpacity>
           </View>
         )}
 
         {/* About / Info section */}
-        <View style={styles.infoCard}>
+  <View style={styles.infoCard} onLayout={(e) => setInfoTop(e.nativeEvent.layout.y)}>
           <TouchableOpacity onPress={() => setShowAbout((v) => !v)}>
             <Text style={styles.infoTitle}>ℹ️ О приложении</Text>
           </TouchableOpacity>
@@ -284,10 +291,10 @@ export default function Index() {
               </Text>
 
               <Text style={styles.infoSubTitle}>Для игроков (🏃‍♂️):</Text>
-              <Text style={styles.infoBullet}>• Зарегистрируйтесь или войдите (или откройте магазин карт без входа).</Text>
+              <Text style={styles.infoBullet}>• Зарегистрируйтесь или войдите в систему.</Text>
               <Text style={styles.infoBullet}>• В разделе «Магазин карт» выберите опубликованную карту и нажмите «Начать прохождение».</Text>
               <Text style={styles.infoBullet}>• Разрешите доступ к геолокации. На экране игры вы увидите своё положение и точки на карте.</Text>
-              <Text style={styles.infoBullet}>• Отмечайте точки сканированием QR‑кода или подойдя к точке: засчитывается при приближении ≈ 30 м.</Text>
+              <Text style={styles.infoBullet}>• Основной способ отметки — сканирование QR‑кода на точке. Приближение может засчитываться, если это предусмотрено настройками судьи для данной карты/точки (радиус определяется организатором).</Text>
               <Text style={styles.infoBullet}>• Последовательные точки открываются по цепочке — следующая активируется после отметки текущей.</Text>
               <Text style={styles.infoBullet}>• Прогресс сохраняется. «Продолжить» — для незавершённых, «Пройденные карты» — завершённые.</Text>
 
